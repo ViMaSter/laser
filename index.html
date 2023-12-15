@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+    <style id="reset">
+        /* http://meyerweb.com/eric/tools/css/reset/ 
+            v2.0 | 20110126
+            License: none (public domain)
+            */
+
+            html, body, div, span, applet, object, iframe,
+            h1, h2, h3, h4, h5, h6, p, blockquote, pre,
+            a, abbr, acronym, address, big, cite, code,
+            del, dfn, em, img, ins, kbd, q, s, samp,
+            small, strike, strong, sub, sup, tt, var,
+            b, u, i, center,
+            dl, dt, dd, ol, ul, li,
+            fieldset, form, label, legend,
+            table, caption, tbody, tfoot, thead, tr, th, td,
+            article, aside, canvas, details, embed, 
+            figure, figcaption, footer, header, hgroup, 
+            menu, nav, output, ruby, section, summary,
+            time, mark, audio, video {
+                margin: 0;
+                padding: 0;
+                border: 0;
+                font-size: 100%;
+                font: inherit;
+                vertical-align: baseline;
+            }
+            /* HTML5 display-role reset for older browsers */
+            article, aside, details, figcaption, figure, 
+            footer, header, hgroup, menu, nav, section {
+                display: block;
+            }
+            body {
+                line-height: 1;
+            }
+            ol, ul {
+                list-style: none;
+            }
+            blockquote, q {
+                quotes: none;
+            }
+            blockquote:before, blockquote:after,
+            q:before, q:after {
+                content: '';
+                content: none;
+            }
+            table {
+                border-collapse: collapse;
+                border-spacing: 0;
+            }
+    </style>
+    <style id="design">
+        * {
+            text-transform: capitalize;
+        }
+        body
+        {
+            background: hsl(26deg 76% 5%);
+            color: hsl(26deg 76% 90%);
+
+            font: 1em/1.5 "Roboto", sans-serif;
+        }
+
+        #editor td
+        {
+            padding: 1em;
+            background: #391d08;
+        }
+
+        #editor td:empty
+        {
+            background: transparent;
+        }
+
+        #game td 
+        {
+            position: relative;
+            overflow: hidden;
+            z-index: 1;
+        }
+
+        #game td::after
+        {
+            content: "";
+            position: absolute;
+            background-size: 100% 100%;
+            width: 100%;
+            height: 100%;
+            top: 0;
+            left: 0;
+            z-index: -1;
+        }
+
+        td.tool-start::after
+        {
+            background-image: url("sprites/start_down.png");
+        }
+        td.tool-goal::after
+        {
+            background-image: url("sprites/goal_down.png");
+        }
+        td.tool-bridge::after
+        {
+            background-image: url("sprites/bridge_down.png");
+        }
+        td.tool-delay:not(.waited)::after
+        {
+            background-image: url("sprites/delay.png");
+        }
+        td.tool-wall::after
+        {
+            background-image: url("sprites/wall.png");
+        }
+        td.tool-deflector::after
+        {
+            background-image: url("sprites/deflector_down.png");
+        }
+
+        td.orientation-right::after
+        {
+            transform: rotate(-90deg);
+        }
+        
+        td.orientation-up::after
+        {
+            transform: rotate(-180deg);
+        }
+
+        td.orientation-left::after
+        {
+            transform: rotate(-270deg);
+        }
+        
+        #levelList button
+        {
+            border: none;
+            background: #391d08;
+            color: hsl(26deg 76% 90%);
+            font: inherit;
+            cursor: pointer;
+        }
+
+        #levelList
+        {
+            margin-top: 1em;
+        }
+
+        #levelList span
+        {
+            margin: 0 1em;
+        }
+    </style>
+    <style id="layouting">
+        :root
+        {
+            --grid-size: 30px;
+        }        
+
+        body
+        {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        #editorWrapper
+        {
+            position: absolute;
+            top: 0;
+            left: 1em;
+            margin: 0 auto;
+            border-collapse: collapse;
+        }
+
+        #gameWrapper
+        {
+            position: relative;
+            height: calc(var(--grid-size) * 25);
+            width: calc(var(--grid-size) * 25);
+        }
+
+        #gameWrapper > *
+        {
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+
+        #laser
+        {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: calc(var(--grid-size) * 25);
+            height: calc(var(--grid-size) * 25);
+
+            z-index: 1;
+
+            pointer-events: none;
+        }
+
+        #game
+        {
+            border-collapse: collapse;
+        }
+
+        #game td
+        {
+            width: var(--grid-size);
+            height: var(--grid-size);
+        }
+
+        #levelList li
+        {
+            display: flex;
+            flex-direction: row;
+            flex-wrap: nowrap;
+            justify-content: space-between;
+        }
+    </style>
+    <script>
+        let ticking;
+        let selectedTool = "";
+        let elements = 
+        {
+            "game": null,
+            "editor": null,
+            "laser": null,
+            "levelList": null
+        };
+
+        // #region GRID HELPER
+        const GRID_DIMENSIONS = 25;
+        const TICK_TIME = 150;
+        let gridData = [];
+
+        const getCellElement = (row, col) => {
+            return elements["game"].rows[row].cells[col];
+        }
+
+        const getCell = (row, col) => {
+            return gridData[row * GRID_DIMENSIONS + col];
+        }
+
+        const move = (row, col, orientation) => {
+            switch (orientation) {
+                case "up":
+                    return {row: row - 1, col};
+                case "right":
+                    return {row, col: col + 1};
+                case "down":
+                    return {row: row + 1, col};
+                case "left":
+                    return {row, col: col - 1};
+            }
+        }
+
+        const rotateDirection = (current) => {
+            switch (current) {
+                case "up":
+                    return "right";
+                case "right":
+                    return "down";
+                case "down":
+                    return "left";
+                case "left":
+                    return "up";
+            }
+        }
+
+        const setCell = (row, col, tool, orientation) => {
+            const cellElement = getCellElement(row, col);
+            cellElement.className = "";
+            if (tool === "empty") {
+                gridData[row * GRID_DIMENSIONS + col] = {tool: "", orientation: ""};
+                cellElement.innerText = "";
+                return;
+            }
+
+            gridData[row * GRID_DIMENSIONS + col] = {tool, orientation};
+            if (!tool) {
+                cellElement.innerText = "";
+                return;
+            }
+
+            // if location contains #debug
+            if (window.location.hash.includes("debug")) {
+                cellElement.innerText = `${tool[0].toUpperCase()}/${orientation[0].toUpperCase()}`;
+            }
+            cellElement.classList.add("tool-"+tool, "orientation-"+orientation);
+        }
+        // #endregion GRID HELPER
+
+        // #region STORAGE
+        const storageActions = {
+            "save": () => {
+                const levels = JSON.parse(localStorage.getItem("levels")) || [];
+                // get biggest number in all level names
+                const biggestNumber = levels.reduce((acc, item) => {
+                    const number = parseInt(item.name.replace("Level ", ""));
+                    if (number > acc) {
+                        return number;
+                    }
+                    return acc;
+                }, 0);
+                const newName = `Level ${(biggestNumber + 1)}`;
+                levels.push({name: newName, gridData});
+                localStorage.setItem("levels", JSON.stringify(levels));
+                console.log(`Saved level ${newName} - Current count: ${levels.length}`);
+                initLevelList();
+            },
+            "load": (levelName) => {
+                const levels = JSON.parse(localStorage.getItem("levels")) || [];
+                const level = levels.find((item) => item.name === levelName);
+                if (!level) {
+                    console.log(`Level ${levelName} not found`);
+                    return;
+                }
+                gridData = level.gridData;
+                gridData.forEach((row, index) => {
+                    const rowIndex = Math.floor(index / GRID_DIMENSIONS);
+                    const colIndex = index % GRID_DIMENSIONS;
+                    setCell(rowIndex, colIndex, gridData[index].tool, gridData[index].orientation);
+                    if (!gridData[index].tool) {
+                        return;
+                    }
+                    console.log(`Loaded ${gridData[index].tool} at ${rowIndex}, ${colIndex}`);
+                });
+            },
+            "clear": () => {
+                if (!confirm("Are you sure you want to clear the current map?")) {
+                    return;
+                }
+                gridData = Array(GRID_DIMENSIONS * GRID_DIMENSIONS).fill("");
+                gridData.forEach((row, index) => {
+                    const rowIndex = Math.floor(index / GRID_DIMENSIONS);
+                    const colIndex = index % GRID_DIMENSIONS;
+                    setCell(rowIndex, colIndex, gridData[index].tool, gridData[index].orientation);
+                });
+            },
+            "listNames": () => {
+                const levels = JSON.parse(localStorage.getItem("levels")) || [];
+                return levels.map((item) => item.name);
+            }
+        };
+        // #endregion STORAGE
+
+        // #region LASER LOGIC
+        const gameActions = {
+            "play": () => {
+                let traversedCells = [];
+
+                const getLineStart = (row, col, orientation) => {
+                    const cell = getCellElement(row, col);
+                    // get rect relative to table (not viewport)
+                    let cellRect = cell.getBoundingClientRect();
+                    cellRect = {
+                        left: cellRect.left - elements["game"].getBoundingClientRect().left, 
+                        top: cellRect.top - elements["game"].getBoundingClientRect().top, 
+                        width: cellRect.width,
+                        height: cellRect.height,
+                        right: cellRect.right - elements["game"].getBoundingClientRect().left,
+                        bottom: cellRect.bottom - elements["game"].getBoundingClientRect().top
+                    };
+                    const cellCenter = {
+                        x: cellRect.left + cellRect.width / 2, 
+                        y: cellRect.top + cellRect.height / 2
+                    };
+                    switch (orientation) {
+                        case "up":
+                            return {x: cellCenter.x, y: cellRect.top};
+                        case "right":
+                            return {x: cellRect.right, y: cellCenter.y};
+                        case "down":
+                            return {x: cellCenter.x, y: cellRect.bottom};
+                        case "left":
+                            return {x: cellRect.left, y: cellCenter.y};
+                    }
+                }
+
+                const startLaser = (startGridIndex) => {
+                    let currentIndex = startGridIndex;
+                    let currentOrientation = gridData[startGridIndex.row * GRID_DIMENSIONS + startGridIndex.col].orientation;
+                    
+                    const ctx = elements["laser"].getContext("2d");
+                    ctx.strokeStyle = "black";
+                    ctx.clearRect(0, 0, elements["laser"].width, elements["laser"].height);
+
+                    const tick = () => {
+                        const nextGridIndex = move(currentIndex.row, currentIndex.col, currentOrientation);
+                        // if out of bounds stop
+                        if (nextGridIndex.row < 0 || nextGridIndex.row >= GRID_DIMENSIONS || nextGridIndex.col < 0 || nextGridIndex.col >= GRID_DIMENSIONS) {
+                            console.log(`Laser left grid at ${nextGridIndex.row}, ${nextGridIndex.col}`);
+                            clearInterval(ticking);
+                            return;
+                        }
+                        const currentPosition = getLineStart(currentIndex.row, currentIndex.col, currentOrientation);
+                        const nextPosition = getLineStart(nextGridIndex.row, nextGridIndex.col, currentOrientation);
+
+                        // before laser hits delay, stop laser for 1 tick, then add "waited" class to cell
+                        if (getCell(nextGridIndex.row, nextGridIndex.col).tool === "delay" && !getCellElement(nextGridIndex.row, nextGridIndex.col).classList.contains("waited")) {
+                            console.log(`Laser hit delay at ${nextGridIndex.row}, ${nextGridIndex.col}`);
+                            clearInterval(ticking);
+                            setTimeout(() => {
+                                const cellElement = getCellElement(nextGridIndex.row, nextGridIndex.col);
+                                cellElement.classList.add("waited");
+                                ticking = setInterval(tick, TICK_TIME);
+                            }, TICK_TIME);
+                            return;
+                        }
+
+                        // if laser hits a wall, stop
+                        if (getCell(nextGridIndex.row, nextGridIndex.col).tool === "wall") {
+                            console.log(`Laser hit wall at ${nextGridIndex.row}, ${nextGridIndex.col}`);
+                            clearInterval(ticking);
+                            return;
+                        }
+
+                        // if laser hits the goal, stop
+                        if (getCell(nextGridIndex.row, nextGridIndex.col).tool === "goal") {
+                            console.log(`Laser hit goal at ${nextGridIndex.row}, ${nextGridIndex.col}`);
+                            clearInterval(ticking);
+                            return;
+                        }
+
+                        // if laser hits an already traversed cell, stop, unless it's a bridge
+                        if (traversedCells.some((item) => item.row === nextGridIndex.row && item.col === nextGridIndex.col)) {
+                            if (getCell(nextGridIndex.row, nextGridIndex.col).tool !== "bridge") {
+                                console.log(`Laser hit already traversed cell at ${nextGridIndex.row}, ${nextGridIndex.col}`);
+                                clearInterval(ticking);
+                                return;
+                            }
+                        }
+
+                        // if laser hits the deflector, change direction
+                        // the deflector will change the direction of the laser by 90 degrees if the laser hits it with the inverse orientation or off by 1x rotate()
+                        if (getCell(nextGridIndex.row, nextGridIndex.col).tool === "deflector") {
+                            // if laser has inverse orientation, change direction
+                            if (getCell(nextGridIndex.row, nextGridIndex.col).orientation === rotateDirection(rotateDirection(currentOrientation))) {
+                                console.log(1);
+                                currentOrientation = rotateDirection(rotateDirection(rotateDirection(currentOrientation)));
+                            }
+                            // if laser has orientation off by 1x rotate(), change direction
+                            else if (getCell(nextGridIndex.row, nextGridIndex.col).orientation === rotateDirection(currentOrientation)) {
+                                console.log(2);
+                                currentOrientation = rotateDirection(currentOrientation);
+                            }
+                            else {
+                                console.log(`Laser hit deflector at ${nextGridIndex.row}, ${nextGridIndex.col} with orientation ${getCell(nextGridIndex.row, nextGridIndex.col).orientation}`);
+                                clearInterval(ticking);
+                                return;
+                            }
+                        }
+
+                        // paint a black line
+                        ctx.beginPath();
+                        ctx.moveTo(currentPosition.x, currentPosition.y);
+                        ctx.lineTo(nextPosition.x, nextPosition.y);
+                        ctx.stroke();
+
+                        traversedCells.push(nextGridIndex);
+
+                        currentIndex = nextGridIndex;
+                    };
+
+                    ticking = setInterval(tick, TICK_TIME);
+                    tick();
+                };
+
+                const startGridIndex = gridData.findIndex((item) => item.tool === "start");
+                if (startGridIndex === -1) {
+                    alert(`No start found!`);
+                    return;
+                }
+                const startGridCoordinates = {row: Math.floor(startGridIndex / GRID_DIMENSIONS), col: startGridIndex % GRID_DIMENSIONS};
+                startLaser(startGridCoordinates);
+            },
+            "stop": () => {
+                clearInterval(ticking);
+
+                document.querySelectorAll(".waited").forEach((item) => {
+                    item.classList.remove("waited");
+                });
+
+                elements["laser"].width = elements["game"].offsetWidth;
+                elements["laser"].height = elements["game"].offsetHeight;
+                const ctx = elements["laser"].getContext("2d");
+                ctx.clearRect(0, 0, elements["laser"].width, elements["laser"].height);
+            }
+        };
+        // #endregion LASER LOGIC
+
+        // #region INIT
+        const initGame = () => {
+            const onCellClick = (e) => {
+                const cell = e.target;
+                const col = cell.cellIndex;
+                const row = cell.parentNode.rowIndex;
+
+                if (!selectedTool) {
+                    console.log(`No tool selected`);
+                    return;
+                }
+
+                if (getCell(row, col).tool === selectedTool) {
+                    setCell(row, col, getCell(row, col).tool, rotateDirection(getCell(row, col).orientation));
+                    console.log(`Rotated ${selectedTool} at ${row}, ${col} to ${getCell(row, col).orientation}`);
+                    return;
+                }
+
+                setCell(row, col, selectedTool, "up");
+                console.log(`Set ${selectedTool} at ${row}, ${col}`);
+            };
+
+            const table = elements["game"];
+            for (let rowIndex = 0; rowIndex < GRID_DIMENSIONS; rowIndex++) {
+                const row = document.createElement("tr");
+                for (let columnIndex = 0; columnIndex < GRID_DIMENSIONS; columnIndex++) {
+                    const cell = document.createElement("td");
+                    const number = (rowIndex * columnIndex + columnIndex)/10 + 10;
+                    cell.style.backgroundColor = `hsl(26deg 76% ${number}%)`;
+                    cell.onclick = onCellClick;
+                    row.appendChild(cell);
+                }
+                table.appendChild(row);
+            }
+
+            gridData = Array(GRID_DIMENSIONS * GRID_DIMENSIONS).fill("");
+            gameActions["stop"]();
+        }
+
+        const initEditor = () => {
+            const onSelect = (e) => {
+                const cell = e.target;
+                const item = cell.classList[1];
+                selectedTool = item;
+            };
+
+            const table = elements["editor"];
+
+            {
+                const items = ["start", "goal", "wall", "deflector", "empty", "delay", "bridge"];
+                items.forEach((item, index) => {
+                    if (index % 2 === 0) {
+                        const row = document.createElement("tr");
+                        table.appendChild(row);
+                    }
+                    const cell = document.createElement("td");
+                    cell.classList.add("item");
+                    cell.classList.add(item);
+                    cell.innerText = item;
+                    cell.onclick = onSelect;
+                    table.lastChild.appendChild(cell);
+                });
+            }
+
+            {
+                const row = document.createElement("tr");
+                row.appendChild(document.createElement("td"));
+                table.appendChild(row);
+            }
+
+            {
+                const row = document.createElement("tr");
+                const stateManagement = Object.keys(gameActions);
+                stateManagement.forEach((item, index) => {
+                    const cell = document.createElement("td");
+                    cell.classList.add("item");
+                    cell.classList.add(item);
+                    cell.innerText = item;
+                    cell.onclick = gameActions[item];
+                    row.appendChild(cell);
+                });
+                table.appendChild(row);
+            }
+
+            {
+                const row = document.createElement("tr");
+                row.appendChild(document.createElement("td"));
+                table.appendChild(row);
+            }
+
+            {
+                const row = document.createElement("tr");
+                const stateManagement = ["save", "clear"];
+                stateManagement.forEach((item, index) => {
+                    const cell = document.createElement("td");
+                    cell.classList.add("item");
+                    cell.classList.add(item);
+                    cell.innerText = item;
+                    cell.onclick = storageActions[item];
+                    row.appendChild(cell);
+                });
+                table.appendChild(row);
+            }
+        }
+
+        const initLevelList = () => {
+            const list = elements["levelList"];
+            list.innerHTML = "";
+            const levelNames = storageActions["listNames"]();
+            levelNames.forEach((name) => {
+                const item = document.createElement("li");
+
+                const deleteButton = document.createElement("button");
+                deleteButton.innerText = "x";
+                deleteButton.onclick = (e) => {
+                    e.stopPropagation();
+                    if (!confirm(`Are you sure you want to delete level ${name}?`)) {
+                        return;
+                    }
+                    const levels = JSON.parse(localStorage.getItem("levels")) || [];
+                    const levelIndex = levels.findIndex((item) => item.name === name);
+                    levels.splice(levelIndex, 1);
+                    localStorage.setItem("levels", JSON.stringify(levels));
+                    console.log(`Deleted level ${name} - Current count: ${levels.length}`);
+                    initLevelList();
+                };
+                item.appendChild(deleteButton);
+                
+                const span = document.createElement("span");
+                span.innerText = name;
+                item.appendChild(span);
+                
+                const loadButton = document.createElement("button");
+                loadButton.innerText = "Load";
+                loadButton.onclick = (e) => {
+                    e.stopPropagation();
+                    if (!confirm(`Are you sure you want to load level ${name}? You will lose any unsaved progress.`)) {
+                        return;
+                    }
+                    storageActions["load"](name);
+                };
+                item.appendChild(loadButton);
+
+                list.appendChild(item);
+            });
+        }
+
+        const init = () => {
+            elements = {
+                "game": document.getElementById("game"),
+                "editor": document.getElementById("editor"),
+                "laser": document.getElementById("laser"),
+                "levelList": document.getElementById("levelList")
+            };
+
+            initGame();
+            initEditor();
+            initLevelList();
+        }
+        // #endregion INIT
+
+        window.onload = init;
+    </script>
+</head>
+<body>
+    <div id="editorWrapper">
+        <table id="editor">
+        </table>
+        <ul id="levelList">
+        </ul>
+    </div>
+    <div id="gameWrapper">
+        <table id="game"></table>
+        <canvas id="laser"></canvas>
+    </div>
+</body>
+</html>
