@@ -123,9 +123,15 @@
         {
             background-image: url("sprites/bridge_down.png");
         }
-        td.tool-delay:not(.waited)::after
+        td.tool-delay::after
         {
             background-image: url("sprites/delay.png");
+            opacity: 0;
+            transition: opacity 0.3s ease-in-out;
+        }
+        td.tool-delay:not(.waited)::after
+        {
+            opacity: 1;
         }
         td.tool-wall::after
         {
@@ -239,7 +245,10 @@
         }
     </style>
     <script>
-        let ticking;
+        let ticks = {};
+        let nextTickID = 0;
+        const getNewTickID = () => ++nextTickID;
+
         let selectedTool = "";
         const setSelectedTool = (tool) => {
             selectedTool = tool;
@@ -260,7 +269,7 @@
 
         // #region GRID HELPER
         const GRID_DIMENSIONS = 25;
-        const TICK_TIME = 150;
+        const TICK_TIME = 300;
         let gridData = [];
 
         const getCellElement = (row, col) => {
@@ -339,6 +348,8 @@
                 initLevelList();
             },
             "load": (levelName) => {
+                gameActions["stop"]();
+                
                 const levels = JSON.parse(localStorage.getItem("levels")) || [];
                 const level = levels.find((item) => item.name === levelName);
                 if (!level) {
@@ -360,6 +371,7 @@
                 if (!confirm("Are you sure you want to clear the current map?")) {
                     return;
                 }
+                gameActions["stop"]();
                 gridData = Array(GRID_DIMENSIONS * GRID_DIMENSIONS).fill("");
                 gridData.forEach((row, index) => {
                     const rowIndex = Math.floor(index / GRID_DIMENSIONS);
@@ -407,105 +419,111 @@
                     }
                 }
 
-                const startLaser = (startGridIndex) => {
-                    let currentIndex = startGridIndex;
-                    let currentOrientation = gridData[startGridIndex.row * GRID_DIMENSIONS + startGridIndex.col].orientation;
-                    
+                const startLasers = (startGridIndex) => {
                     const ctx = elements["laser"].getContext("2d");
                     ctx.strokeStyle = "black";
                     ctx.clearRect(0, 0, elements["laser"].width, elements["laser"].height);
 
-                    const tick = () => {
-                        const nextGridIndex = move(currentIndex.row, currentIndex.col, currentOrientation);
-                        // if out of bounds stop
-                        if (nextGridIndex.row < 0 || nextGridIndex.row >= GRID_DIMENSIONS || nextGridIndex.col < 0 || nextGridIndex.col >= GRID_DIMENSIONS) {
-                            console.log(`Laser left grid at ${nextGridIndex.row}, ${nextGridIndex.col}`);
-                            clearInterval(ticking);
-                            return;
-                        }
-                        const currentPosition = getLineStart(currentIndex.row, currentIndex.col, currentOrientation);
-                        const nextPosition = getLineStart(nextGridIndex.row, nextGridIndex.col, currentOrientation);
+                    const initiateTick = (tickID) => {
+                        let currentIndex = startGridIndex;
+                        let currentOrientation = gridData[startGridIndex.row * GRID_DIMENSIONS + startGridIndex.col].orientation;
+                        const thisTickID = tickID;
+                        return () => {
+                            const nextGridIndex = move(currentIndex.row, currentIndex.col, currentOrientation);
+                            // if out of bounds stop
+                            if (nextGridIndex.row < 0 || nextGridIndex.row >= GRID_DIMENSIONS || nextGridIndex.col < 0 || nextGridIndex.col >= GRID_DIMENSIONS) {
+                                console.log(`Laser left grid at ${nextGridIndex.row}, ${nextGridIndex.col}`);
+                                Object.keys(ticks).forEach(clearInterval);
+                                return;
+                            }
+                            const currentPosition = getLineStart(currentIndex.row, currentIndex.col, currentOrientation);
+                            const nextPosition = getLineStart(nextGridIndex.row, nextGridIndex.col, currentOrientation);
 
-                        // before laser hits delay, stop laser for 1 tick, then add "waited" class to cell
-                        if (getCell(nextGridIndex.row, nextGridIndex.col).tool === "delay" && !getCellElement(nextGridIndex.row, nextGridIndex.col).classList.contains("waited")) {
-                            console.log(`Laser hit delay at ${nextGridIndex.row}, ${nextGridIndex.col}`);
-                            clearInterval(ticking);
-                            setTimeout(() => {
+                            // before laser hits delay, stop laser for 1 tick, then add "waited" class to cell
+                            if (getCell(nextGridIndex.row, nextGridIndex.col).tool === "delay" && !getCellElement(nextGridIndex.row, nextGridIndex.col).classList.contains("waited")) {
+                                console.log(`Laser hit delay at ${nextGridIndex.row}, ${nextGridIndex.col}`);
                                 const cellElement = getCellElement(nextGridIndex.row, nextGridIndex.col);
                                 cellElement.classList.add("waited");
-                                ticking = setInterval(tick, TICK_TIME);
-                            }, TICK_TIME);
-                            return;
-                        }
-
-                        // if laser hits a wall, stop
-                        if (getCell(nextGridIndex.row, nextGridIndex.col).tool === "wall") {
-                            console.log(`Laser hit wall at ${nextGridIndex.row}, ${nextGridIndex.col}`);
-                            clearInterval(ticking);
-                            return;
-                        }
-
-                        // if laser hits the goal, stop
-                        if (getCell(nextGridIndex.row, nextGridIndex.col).tool === "goal") {
-                            console.log(`Laser hit goal at ${nextGridIndex.row}, ${nextGridIndex.col}`);
-                            clearInterval(ticking);
-                            return;
-                        }
-
-                        // if laser hits an already traversed cell, stop, unless it's a bridge
-                        if (traversedCells.some((item) => item.row === nextGridIndex.row && item.col === nextGridIndex.col)) {
-                            if (getCell(nextGridIndex.row, nextGridIndex.col).tool !== "bridge") {
-                                console.log(`Laser hit already traversed cell at ${nextGridIndex.row}, ${nextGridIndex.col}`);
-                                clearInterval(ticking);
                                 return;
                             }
-                        }
 
-                        // if laser hits the deflector, change direction
-                        // the deflector will change the direction of the laser by 90 degrees if the laser hits it with the inverse orientation or off by 1x rotate()
-                        if (getCell(nextGridIndex.row, nextGridIndex.col).tool === "deflector") {
-                            // if laser has inverse orientation, change direction
-                            if (getCell(nextGridIndex.row, nextGridIndex.col).orientation === rotateDirection(rotateDirection(currentOrientation))) {
-                                console.log(1);
-                                currentOrientation = rotateDirection(rotateDirection(rotateDirection(currentOrientation)));
-                            }
-                            // if laser has orientation off by 1x rotate(), change direction
-                            else if (getCell(nextGridIndex.row, nextGridIndex.col).orientation === rotateDirection(currentOrientation)) {
-                                console.log(2);
-                                currentOrientation = rotateDirection(currentOrientation);
-                            }
-                            else {
-                                console.log(`Laser hit deflector at ${nextGridIndex.row}, ${nextGridIndex.col} with orientation ${getCell(nextGridIndex.row, nextGridIndex.col).orientation}`);
-                                clearInterval(ticking);
+                            // if laser hits a wall, stop
+                            if (getCell(nextGridIndex.row, nextGridIndex.col).tool === "wall") {
+                                console.log(`Laser hit wall at ${nextGridIndex.row}, ${nextGridIndex.col}`);
+                                Object.keys(ticks).forEach(clearInterval);
                                 return;
                             }
+
+                            // if laser hits the goal, stop
+                            if (getCell(nextGridIndex.row, nextGridIndex.col).tool === "goal") {
+                                console.log(`Laser hit goal at ${nextGridIndex.row}, ${nextGridIndex.col}`);
+                                clearInterval(ticks[thisTickID]);
+                                return;
+                            }
+
+                            // if laser hits an already traversed cell, stop, unless it's a bridge
+                            if (traversedCells.some((item) => item.row === nextGridIndex.row && item.col === nextGridIndex.col)) {
+                                if (getCell(nextGridIndex.row, nextGridIndex.col).tool !== "bridge") {
+                                    console.log(`Laser hit already traversed cell at ${nextGridIndex.row}, ${nextGridIndex.col}`);
+                                    Object.keys(ticks).forEach(clearInterval);
+                                    return;
+                                }
+                            }
+
+                            // if laser hits the deflector, change direction
+                            // the deflector will change the direction of the laser by 90 degrees if the laser hits it with the inverse orientation or off by 1x rotate()
+                            if (getCell(nextGridIndex.row, nextGridIndex.col).tool === "deflector") {
+                                // if laser has inverse orientation, change direction
+                                if (getCell(nextGridIndex.row, nextGridIndex.col).orientation === rotateDirection(rotateDirection(currentOrientation))) {
+                                    console.log(1);
+                                    currentOrientation = rotateDirection(rotateDirection(rotateDirection(currentOrientation)));
+                                }
+                                // if laser has orientation off by 1x rotate(), change direction
+                                else if (getCell(nextGridIndex.row, nextGridIndex.col).orientation === rotateDirection(currentOrientation)) {
+                                    console.log(2);
+                                    currentOrientation = rotateDirection(currentOrientation);
+                                }
+                                else {
+                                    console.log(`Laser hit deflector at ${nextGridIndex.row}, ${nextGridIndex.col} with orientation ${getCell(nextGridIndex.row, nextGridIndex.col).orientation}`);
+                                    Object.keys(ticks).forEach(clearInterval);
+                                    return;
+                                }
+                            }
+
+                            // paint a black line
+                            ctx.beginPath();
+                            ctx.moveTo(currentPosition.x, currentPosition.y);
+                            ctx.lineTo(nextPosition.x, nextPosition.y);
+                            ctx.stroke();
+
+                            traversedCells.push(nextGridIndex);
+
+                            currentIndex = nextGridIndex;
                         }
-
-                        // paint a black line
-                        ctx.beginPath();
-                        ctx.moveTo(currentPosition.x, currentPosition.y);
-                        ctx.lineTo(nextPosition.x, nextPosition.y);
-                        ctx.stroke();
-
-                        traversedCells.push(nextGridIndex);
-
-                        currentIndex = nextGridIndex;
                     };
 
-                    ticking = setInterval(tick, TICK_TIME);
-                    tick();
+                    const tickID = getNewTickID();
+                    ticks[tickID] = setInterval(initiateTick(tickID), TICK_TIME);
                 };
 
-                const startGridIndex = gridData.findIndex((item) => item.tool === "start");
-                if (startGridIndex === -1) {
+                const startGridLocations = gridData.reduce((acc, item, index) => {
+                    if (item.tool === "start") {
+                        acc.push({row: Math.floor(index / GRID_DIMENSIONS), col: index % GRID_DIMENSIONS});
+                    }
+                    return acc;
+                }, []);
+
+                if (startGridLocations.length <= 0) {
                     alert(`No start found!`);
                     return;
                 }
-                const startGridCoordinates = {row: Math.floor(startGridIndex / GRID_DIMENSIONS), col: startGridIndex % GRID_DIMENSIONS};
-                startLaser(startGridCoordinates);
+
+                startGridLocations.forEach((startGridIndex) => {
+                    startLasers(startGridIndex);
+                });
             },
             "stop": () => {
-                clearInterval(ticking);
+                Object.keys(ticks).forEach(clearInterval);
 
                 document.querySelectorAll(".waited").forEach((item) => {
                     item.classList.remove("waited");
