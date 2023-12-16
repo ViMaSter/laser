@@ -58,6 +58,12 @@
         * {
             text-transform: capitalize;
         }
+
+        td
+        {
+            cursor: pointer;
+        }
+
         body
         {
             background: hsl(26deg 76% 5%);
@@ -70,6 +76,15 @@
         {
             padding: 1em;
             background: #391d08;
+        }
+        #editor td:hover
+        {
+            background: #4f2a0d;
+        }
+        #editor td:active,
+        #editor td.active-tool
+        {
+            background: #291405;
         }
 
         #editor td:empty
@@ -226,6 +241,15 @@
     <script>
         let ticking;
         let selectedTool = "";
+        const setSelectedTool = (tool) => {
+            selectedTool = tool;
+            document.querySelectorAll(".item").forEach((item) => {
+                item.classList.remove("active-tool");
+            });
+            document.querySelectorAll(`.item.${tool}`).forEach((item) => {
+                item.classList.add("active-tool");
+            });
+        };
         let elements = 
         {
             "game": null,
@@ -276,7 +300,7 @@
         const setCell = (row, col, tool, orientation) => {
             const cellElement = getCellElement(row, col);
             cellElement.className = "";
-            if (tool === "empty") {
+            if (tool === "remove") {
                 gridData[row * GRID_DIMENSIONS + col] = {tool: "", orientation: ""};
                 cellElement.innerText = "";
                 return;
@@ -537,14 +561,14 @@
         const initEditor = () => {
             const onSelect = (e) => {
                 const cell = e.target;
-                const item = cell.classList[1];
-                selectedTool = item;
+                const item = cell.id;
+                setSelectedTool(item);
             };
 
             const table = elements["editor"];
 
             {
-                const items = ["start", "goal", "wall", "deflector", "empty", "delay", "bridge"];
+                const items = ["start", "goal", "wall", "deflector", "delay", "bridge", "remove"];
                 items.forEach((item, index) => {
                     if (index % 2 === 0) {
                         const row = document.createElement("tr");
@@ -553,6 +577,7 @@
                     const cell = document.createElement("td");
                     cell.classList.add("item");
                     cell.classList.add(item);
+                    cell.id = item;
                     cell.innerText = item;
                     cell.onclick = onSelect;
                     table.lastChild.appendChild(cell);
