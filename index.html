@@ -92,14 +92,17 @@
             background: transparent;
         }
 
-        #game td 
+        #game td,
+        #inventory td
         {
             position: relative;
             overflow: hidden;
             z-index: 1;
+            vertical-align: middle;
         }
 
-        #game td::after
+        #game td::after,
+        #inventory td::after
         {
             content: "";
             position: absolute;
@@ -230,7 +233,8 @@
             border-collapse: collapse;
         }
 
-        #game td
+        #game td,
+        #inventory td
         {
             width: var(--grid-size);
             height: var(--grid-size);
@@ -243,11 +247,24 @@
             flex-wrap: nowrap;
             justify-content: space-between;
         }
+
+        #inventory
+        {
+            position: absolute;
+            top: 0;
+            right: 1em;
+            width: calc(var(--grid-size) * 1 * 2);
+            height: calc(var(--grid-size) * 10 * 2);
+            border-collapse: collapse;
+            background: #391d08;
+            text-align: center;
+        }
     </style>
     <script>
         let ticks = {};
         let nextTickID = 0;
         const getNewTickID = () => ++nextTickID;
+        let currentlyDraggedItem = null;
 
         let selectedTool = "";
         const setSelectedTool = (tool) => {
@@ -304,6 +321,36 @@
                 case "left":
                     return "up";
             }
+        }
+
+        let currentInventory = [];
+        // tooldata:
+        /*
+            [
+                {
+                    tool: deflector,
+                    orientation: up
+                    count: 2
+                },
+                ...
+            ]
+        */
+        const setInventory = (toolData) => 
+        {
+            currentInventory = toolData;
+            const table = elements["inventory"].querySelector("table");
+            table.innerHTML = "";
+            // replicate game td's with classes and orientation
+            toolData.forEach((item) => {
+                const row = document.createElement("tr");
+                const cell = document.createElement("td");
+                cell.classList.add("tool-"+item.tool, "orientation-"+item.orientation);
+                row.appendChild(cell);
+                const cell2 = document.createElement("td");
+                cell2.innerText = item.count;
+                row.appendChild(cell2);
+                table.appendChild(row);
+            });
         }
 
         const setCell = (row, col, tool, orientation) => {
@@ -564,15 +611,49 @@
                 const row = document.createElement("tr");
                 for (let columnIndex = 0; columnIndex < GRID_DIMENSIONS; columnIndex++) {
                     const cell = document.createElement("td");
+                    cell.draggable = true;
                     const number = (rowIndex * columnIndex + columnIndex)/10 + 10;
                     cell.style.backgroundColor = `hsl(26deg 76% ${number}%)`;
                     cell.onclick = onCellClick;
+                    cell.ondragstart = (e) => {
+                        currentlyDraggedItem = {row: rowIndex, col: columnIndex};
+                        console.log(`Dragged ${getCell(rowIndex, columnIndex).tool} at ${rowIndex}, ${columnIndex}`);
+                    };
+                    cell.ondragend = (e) => {
+                        currentlyDraggedItem = null;
+                    };
+                    cell.ondragover = (e) => {
+                        e.preventDefault();
+                    };
                     row.appendChild(cell);
                 }
                 table.appendChild(row);
             }
 
             gridData = Array(GRID_DIMENSIONS * GRID_DIMENSIONS).fill("");
+            
+            document.querySelector("#inventory").ondragover = (e) => {
+                e.preventDefault();
+            };
+            document.querySelector("#inventory").ondrop = (e) => {
+                event.preventDefault();
+                console.log("dropped");
+                if (!currentlyDraggedItem) {
+                    return;
+                }
+                const cellData = getCell(currentlyDraggedItem.row, currentlyDraggedItem.col);
+                const item = cellData.tool;
+                const orientation = getCell(currentlyDraggedItem.row, currentlyDraggedItem.col).orientation;
+                console.log(`Dropped ${item} from ${currentlyDraggedItem.row}, ${currentlyDraggedItem.col} with orientation ${orientation}`);
+                if (currentInventory.some((item) => item.tool === cellData.tool && item.orientation === orientation)) {
+                    const itemIndex = currentInventory.findIndex((item) => item.tool === cellData.tool && item.orientation === orientation);
+                    currentInventory[itemIndex].count++;
+                    setInventory(currentInventory);
+                    return;
+                }
+                setInventory([...currentInventory, {tool: item, orientation, count: 1}]);
+            };
+            
             gameActions["stop"]();
         }
 
@@ -690,7 +771,8 @@
                 "game": document.getElementById("game"),
                 "editor": document.getElementById("editor"),
                 "laser": document.getElementById("laser"),
-                "levelList": document.getElementById("levelList")
+                "levelList": document.getElementById("levelList"),
+                "inventory": document.getElementById("inventory")
             };
 
             initGame();
@@ -712,6 +794,9 @@
     <div id="gameWrapper">
         <table id="game"></table>
         <canvas id="laser"></canvas>
+    </div>
+    <div id="inventory">
+        <table></table>
     </div>
 </body>
 </html>
